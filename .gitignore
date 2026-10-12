@@ -211,3 +211,5 @@ results/
 data/
 pretrained_models/
 outputs/
+
+train_salad_backup.py
