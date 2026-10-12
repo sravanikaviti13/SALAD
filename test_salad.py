@@ -7,6 +7,9 @@ from logger import log
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
+from datetime import datetime, timezone
+from uuid import uuid4
+
 seed = 42
 on_gpu = torch.cuda.is_available()
 out_channels = 384
@@ -16,6 +19,9 @@ def test_all():
 
     config = get_argparse()
     seed = config.seed
+
+    run_id = str(uuid4())
+    run_timestamp_utc = datetime.now(timezone.utc).isoformat()
 
     dataset_path = config.mvtec_loco_path
     seg_dataset_path = config.mvtec_loco_seg_path
@@ -64,11 +70,11 @@ def test_all():
     validation_loader = DataLoader(validation_set, batch_size=1)
     
 
-    teacher = torch.load(f"{train_output_dir}/teacher_final.pth")
-    autoencoder = torch.load(f"{train_output_dir}/autoencoder_final.pth")
-    student = torch.load(f"{train_output_dir}/student_final.pth")
-    comp_ae = torch.load(f"{train_output_dir}/comp_autoencoder_final.pth")
-    comp_unet = torch.load(f"{train_output_dir}/comp_unet_final.pth")
+    teacher = torch.load(f"{train_output_dir}/teacher_final.pth", weights_only=False)
+    autoencoder = torch.load(f"{train_output_dir}/autoencoder_final.pth", weights_only=False)
+    student = torch.load(f"{train_output_dir}/student_final.pth", weights_only=False)
+    comp_ae = torch.load(f"{train_output_dir}/comp_autoencoder_final.pth", weights_only=False)
+    comp_unet = torch.load(f"{train_output_dir}/comp_unet_final.pth", weights_only=False)
     
 
     # teacher frozen
@@ -102,15 +108,19 @@ def test_all():
         test_set=test_set, teacher=teacher, student=student, comp_ae=comp_ae, comp_unet=comp_unet,
         autoencoder=autoencoder, teacher_mean=teacher_mean,
         teacher_std=teacher_std, feature_vectors_covinv=feature_vectors_covinv, feature_vectors_mean=feature_vectors_mean, feature_vectors_covinv_seg=feature_vectors_covinv_seg, feature_vectors_mean_seg=feature_vectors_mean_seg, feature_vectors_covinv_seg_area=feature_vectors_covinv_seg_area, feature_vectors_mean_seg_area=feature_vectors_mean_seg_area,
-        q_st_start=q_st_start, q_st_end=q_st_end, q_ae_start=q_ae_start, q_eff_start=q_eff_start, q_eff_end=q_eff_end, q_ae_end=q_ae_end, q_seg_start=q_seg_start, q_seg_end=q_seg_end, q_start_mah=q_start_mah, q_end_mah=q_end_mah, desc='Final inference')
+        q_st_start=q_st_start, q_st_end=q_st_end, q_ae_start=q_ae_start, q_eff_start=q_eff_start, q_eff_end=q_eff_end, q_ae_end=q_ae_end, q_seg_start=q_seg_start, q_seg_end=q_seg_end, q_start_mah=q_start_mah, q_end_mah=q_end_mah, desc='Final inference', 
+        predictions_output_path=os.path.join(train_output_dir, "predictions.csv",), model_version="salad-v1",run_id=run_id,run_timestamp_utc=run_timestamp_utc,)
     print('Final image auc: {:.4f}, img {:.4f}, mlp {:.4f}, comp {:.4f}'.format(auc, auc_img, auc_mlp, auc_comp))
     results = {
-        "Iteration": [-1],
-        "Category": [config.category],
-        "AUC": [auc],
-        "AUC Img": [auc_img],
-        "AUC Maha": [auc_mlp],
-        "AUC Comp": [auc_comp]
+        "run_id": [run_id],
+        "run_timestamp_utc": [run_timestamp_utc],
+        "model_version": ["salad-v1"],
+        "iteration": [-1],
+        "category": [config.category],
+        "auc": [auc],
+        "auc_img": [auc_img],
+        "auc_maha": [auc_mlp],
+        "auc_comp": [auc_comp],
     }
     log(train_output_dir,results)
 

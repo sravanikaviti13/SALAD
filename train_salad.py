@@ -22,6 +22,13 @@ from logger import log
 from dice_loss import DiceLoss
 from argparser import get_argparse
 
+import time
+
+from src.evaluation.export_predictions import (
+    build_prediction_row,
+    write_prediction_rows,
+)
+
 # constants
 seed = 42
 on_gpu = torch.cuda.is_available()
@@ -347,7 +354,8 @@ def test(test_set, teacher, student, autoencoder, comp_ae, comp_unet,
          teacher_mean, teacher_std,
          feature_vectors_covinv, feature_vectors_mean, feature_vectors_covinv_seg, feature_vectors_mean_seg, feature_vectors_covinv_seg_area, feature_vectors_mean_seg_area,
          q_st_start, q_st_end, q_ae_start, q_ae_end, q_eff_start, q_eff_end, q_seg_start, q_seg_end, q_start_mah, q_end_mah,
-         desc='Running inference'):
+         desc='Running inference', 
+         predictions_output_path=None, model_version="salad-v1",run_id=None,run_timestamp_utc=None,):
     y_true = {"good":[],"logical_anomalies":[],"structural_anomalies":[]}
     y_score_no_mah = {"good":[],"logical_anomalies":[],"structural_anomalies":[]}
     y_score_mah = {"good":[],"logical_anomalies":[],"structural_anomalies":[]}
@@ -355,8 +363,10 @@ def test(test_set, teacher, student, autoencoder, comp_ae, comp_unet,
     y_score = {"good":[],"logical_anomalies":[],"structural_anomalies":[]}
     y_score_mah_all = []
     y_score_no_mah_all = []
+    prediction_rows = []
     for image, seg, target, path in tqdm(test_set, desc=desc):
 
+        start_time = time.perf_counter()
         image = image.unsqueeze(0)
         if on_gpu:
             image = image.cuda()
@@ -391,6 +401,24 @@ def test(test_set, teacher, student, autoencoder, comp_ae, comp_unet,
 
         y_score_mah_all.append(mahalanobis_score)
         y_score_no_mah_all.append(y_score_img_no_mlp)
+
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        prediction_rows.append(
+            build_prediction_row(
+                run_id=run_id,
+                run_timestamp_utc=run_timestamp_utc,
+                path=path,
+                split="test",
+                anomaly_type=defect_class,
+                image_score=y_score_img_no_mlp,
+                mahalanobis_score=mahalanobis_score,
+                composition_score=np.max(map_comp),
+                final_anomaly_score=y_score_image,
+                #latency_ms=0.0,
+                latency_ms=latency_ms,
+                model_version=model_version,
+            )
+        )
     
     auc_log = roc_auc_score(y_true=y_true['good']+y_true['logical_anomalies'], y_score=y_score['good'] + y_score['logical_anomalies'])
     auc_str = roc_auc_score(y_true=y_true['good']+y_true['structural_anomalies'], y_score=y_score['good']+y_score['structural_anomalies'])
@@ -411,6 +439,8 @@ def test(test_set, teacher, student, autoencoder, comp_ae, comp_unet,
     print(f"Img Logical: {auc_log_no_mah*100}, Struct: {auc_str_no_mah*100}")
     print(f"Comp Logical: {auc_log_comp*100}, Struct: {auc_str_comp*100}")
     print("")
+    if predictions_output_path is not None:
+        write_prediction_rows(prediction_rows, predictions_output_path)
     return auc * 100, auc_img * 100 , auc_mlp * 100, auc_comp*100
 
 @torch.no_grad()
