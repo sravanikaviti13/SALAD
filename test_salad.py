@@ -2,7 +2,7 @@ from argparser import get_argparse
 import os
 import torch
 from salad_dataset import ImageFolderWithoutTarget, ImageFolderWithPath, ImageFolderWithoutTargetWithSeg, ImageFolderWithPathWithSeg
-from train_salad import teacher_normalization, map_normalization, score_normalization, extract_features_mahalanobis, test, map_normalization_mahalanobis, train_transform, default_transform
+from train_salad import teacher_normalization, map_normalization, score_normalization, extract_features_mahalanobis, test, map_normalization_mahalanobis, export_validation_predictions, train_transform, default_transform
 from logger import log
 from torchvision import transforms
 from torch.utils.data import DataLoader
@@ -68,6 +68,29 @@ def test_all():
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True,
                               num_workers=4, pin_memory=True)
     validation_loader = DataLoader(validation_set, batch_size=1)
+
+    validation_image_set_with_path = ImageFolderWithPath(
+        os.path.join(dataset_path, config.category, "validation"),
+        transform=default_transform,
+    )
+    validation_image_set_with_path.seg = False
+
+    validation_seg_set_for_export = ImageFolderWithoutTarget(
+        os.path.join(seg_dataset_path, config.category, "validation"),
+        transform=default_transform,
+    )
+    validation_seg_set_for_export.seg = True
+
+    validation_image_loader_with_path = DataLoader(
+        validation_image_set_with_path,
+        batch_size=1,
+        shuffle=False,
+    )
+    validation_seg_loader_for_export = DataLoader(
+        validation_seg_set_for_export,
+        batch_size=1,
+        shuffle=False,
+    )
     
 
     teacher = torch.load(f"{train_output_dir}/teacher_final.pth", weights_only=False)
@@ -104,6 +127,43 @@ def test_all():
         teacher_std=teacher_std, q_st_start=q_st_start, q_st_end=q_st_end, q_ae_start=q_ae_start, q_ae_end=q_ae_end, desc='Final score normalization')
     feature_vectors_mean, feature_vectors_covinv, feature_vectors_mean_seg, feature_vectors_covinv_seg, feature_vectors_mean_seg_area, feature_vectors_covinv_seg_area = extract_features_mahalanobis(train_loader, train_set, student, teacher_mean, teacher_std)
     q_start_mah, q_end_mah = map_normalization_mahalanobis(validation_loader, student, teacher_mean, teacher_std, feature_vectors_covinv, feature_vectors_mean, feature_vectors_covinv_seg, feature_vectors_mean_seg, feature_vectors_covinv_seg_area, feature_vectors_mean_seg_area)
+    
+    export_validation_predictions(
+        validation_image_loader=validation_image_loader_with_path,
+        validation_seg_loader=validation_seg_loader_for_export,
+        teacher=teacher,
+        student=student,
+        autoencoder=autoencoder,
+        comp_ae=comp_ae,
+        comp_unet=comp_unet,
+        teacher_mean=teacher_mean,
+        teacher_std=teacher_std,
+        feature_vectors_covinv=feature_vectors_covinv,
+        feature_vectors_mean=feature_vectors_mean,
+        feature_vectors_covinv_seg=feature_vectors_covinv_seg,
+        feature_vectors_mean_seg=feature_vectors_mean_seg,
+        feature_vectors_covinv_seg_area=feature_vectors_covinv_seg_area,
+        feature_vectors_mean_seg_area=feature_vectors_mean_seg_area,
+        q_st_start=q_st_start,
+        q_st_end=q_st_end,
+        q_ae_start=q_ae_start,
+        q_ae_end=q_ae_end,
+        q_eff_start=q_eff_start,
+        q_eff_end=q_eff_end,
+        q_seg_start=q_seg_start,
+        q_seg_end=q_seg_end,
+        q_start_mah=q_start_mah,
+        q_end_mah=q_end_mah,
+        predictions_output_path=os.path.join(
+            train_output_dir,
+            "validation_predictions.csv",
+        ),
+        run_id=run_id,
+        run_timestamp_utc=run_timestamp_utc,
+        model_version="salad-v1",
+        desc="Validation score export",
+    )
+
     auc, auc_img, auc_mlp, auc_comp = test(
         test_set=test_set, teacher=teacher, student=student, comp_ae=comp_ae, comp_unet=comp_unet,
         autoencoder=autoencoder, teacher_mean=teacher_mean,

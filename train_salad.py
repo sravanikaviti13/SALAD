@@ -350,6 +350,119 @@ def main():
     }
     log(train_output_dir,results)
 
+def export_validation_predictions(
+    validation_image_loader,
+    validation_seg_loader,
+    teacher,
+    student,
+    autoencoder,
+    comp_ae,
+    comp_unet,
+    teacher_mean,
+    teacher_std,
+    feature_vectors_covinv,
+    feature_vectors_mean,
+    feature_vectors_covinv_seg,
+    feature_vectors_mean_seg,
+    feature_vectors_covinv_seg_area,
+    feature_vectors_mean_seg_area,
+    q_st_start,
+    q_st_end,
+    q_ae_start,
+    q_ae_end,
+    q_eff_start,
+    q_eff_end,
+    q_seg_start,
+    q_seg_end,
+    q_start_mah,
+    q_end_mah,
+    predictions_output_path,
+    run_id,
+    run_timestamp_utc,
+    model_version="salad-v1",
+    desc="Validation inference",):
+    
+    prediction_rows = []
+
+    for image_batch, seg_batch in tqdm(
+        zip(validation_image_loader, validation_seg_loader, strict=True),
+        total=len(validation_image_loader),
+        desc=desc,):
+
+        image, _, paths = image_batch
+        path = paths[0]
+        seg = seg_batch.squeeze(0)
+
+        start_time = time.perf_counter()
+
+        #image = image.unsqueeze(0)
+        if on_gpu:
+            image = image.cuda()
+            seg = seg.cuda()
+
+        map_combined, _, _ = predict(
+            image=image,
+            teacher=teacher,
+            student=student,
+            autoencoder=autoencoder,
+            teacher_mean=teacher_mean,
+            teacher_std=teacher_std,
+            q_st_start=q_st_start,
+            q_st_end=q_st_end,
+            q_ae_start=q_ae_start,
+            q_ae_end=q_ae_end,
+        )
+
+        map_combined = (map_combined - q_eff_start) / q_eff_end
+        map_combined = map_combined[0, 0].cpu().numpy()
+
+        map_comp = predict_comp_map(seg, comp_ae, comp_unet).unsqueeze(0)
+        map_comp = (map_comp - q_seg_start) / q_seg_end
+        map_comp = map_comp[0, 0].cpu().numpy()
+
+        mahalanobis_score = predict_mahalanobis(
+            image=image,
+            seg=seg,
+            teacher=student,
+            teacher_mean=teacher_mean,
+            feature_vectors_covinv=feature_vectors_covinv,
+            feature_vectors_mean=feature_vectors_mean,
+            feature_vectors_covinv_seg=feature_vectors_covinv_seg,
+            feature_vectors_mean_seg=feature_vectors_mean_seg,
+            feature_vectors_covinv_seg_area=feature_vectors_covinv_seg_area,
+            feature_vectors_mean_seg_area=feature_vectors_mean_seg_area,
+            teacher_std=teacher_std,
+            q_start=q_start_mah,
+            q_end=q_end_mah,
+        )
+
+        image_score = np.max(map_combined)
+        composition_score = np.max(map_comp)
+        final_anomaly_score = (
+            image_score
+            + mahalanobis_score
+            + composition_score
+        )
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        prediction_rows.append(
+            build_prediction_row(
+                run_id=run_id,
+                run_timestamp_utc=run_timestamp_utc,
+                path=path,
+                split="validation",
+                anomaly_type="good",
+                image_score=image_score,
+                mahalanobis_score=mahalanobis_score,
+                composition_score=composition_score,
+                final_anomaly_score=final_anomaly_score,
+                latency_ms=latency_ms,
+                model_version=model_version,
+            )
+        )
+
+    write_prediction_rows(prediction_rows, predictions_output_path)
+
 def test(test_set, teacher, student, autoencoder, comp_ae, comp_unet, 
          teacher_mean, teacher_std,
          feature_vectors_covinv, feature_vectors_mean, feature_vectors_covinv_seg, feature_vectors_mean_seg, feature_vectors_covinv_seg_area, feature_vectors_mean_seg_area,
